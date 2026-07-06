@@ -2,31 +2,28 @@ import streamlit as st
 import pdfplumber
 import easyocr
 from PIL import Image
-from pdf2image import convert_from_bytes
 import numpy as np
 import re
 import pandas as pd
+import fitz  # PyMuPDF ตัวแปลง PDF เป็นภาพแบบไม่ต้องใช้ Poppler
 
 st.set_page_config(page_title="ระบบวิเคราะห์เอกสารจับกุม (มีระบบล็อกอิน)", layout="wide")
 
 # ==========================================
 # 0. ระบบตรวจสอบการเข้าสู่ระบบ (Authentication)
 # ==========================================
-# กำหนดรหัสผ่านที่ต้องการ (สามารถเปลี่ยนคำในอัญประกาศได้ตามใจชอบครับ)
-PASSWORD_TRUE = "Ryoarrest1996" 
+PASSWORD_TRUE = "Arrest1234" 
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
 def login_form():
-    """ฟังก์ชันแสดงหน้าจอให้กรอกรหัสผ่าน"""
     st.markdown("<h2 style='text-align: center;'>🔒 กรุณากรอกรหัสผ่านเพื่อเข้าใช้งานระบบ</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: gray;'>ระบบวิเคราะห์และสรุปสถิติเอกสารจับกุมอัตโนมัติ</p>", unsafe_allow_html=True)
     
-    # สร้างกล่องตรงกลางหน้าจอสำหรับกรอกรหัส
     _, col_center, _ = st.columns([1, 2, 1])
     with col_center:
-        user_password = st.text_input("รหัสผ่านผู้ใช้งาน:", type="password", help="กรุณาติดต่อผู้ดูแลระบบเพื่อขอรับรหัสผ่าน")
+        user_password = st.text_input("รหัสผ่านผู้ใช้งาน:", type="password")
         if st.button("เข้าสู่ระบบ 🚀", use_container_width=True):
             if user_password == PASSWORD_TRUE:
                 st.session_state.logged_in = True
@@ -35,13 +32,12 @@ def login_form():
             else:
                 st.error("❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง")
 
-# ตรวจสอบสถานะ: ถ้ายังไม่ได้ล็อกอิน ให้แสดงหน้ากรอกรหัสแล้วหยุดการทำงานที่เหลือทันที
 if not st.session_state.logged_in:
     login_form()
-    st.stop() # หยุดไม่ให้แสดงเนื้อหาด้านล่างหากรหัสยังไม่ถูกต้อง
+    st.stop()
 
 # ==========================================
-# 1. โหลดตัวอ่าน OCR ภาษาไทย และ อังกฤษ (จะทำงานหลังล็อกอินแล้ว)
+# 1. โหลดตัวอ่าน OCR ภาษาไทย และ อังกฤษ
 # ==========================================
 @st.cache_resource
 def load_ocr_reader():
@@ -49,7 +45,6 @@ def load_ocr_reader():
 
 reader = load_ocr_reader()
 
-# สร้างตารางเก็บประวัติการจับกุมในหน่วยความจำ
 if 'arrest_history' not in st.session_state:
     st.session_state.arrest_history = pd.DataFrame(columns=['ชื่อไฟล์', 'วันที่จับกุม', 'สัญชาติ', 'สถานที่จับกุม'])
 
@@ -80,9 +75,8 @@ def extract_arrest_info(text):
     return nationality, location, arrest_date
 
 # ==========================================
-# 3. ส่วนหน้าตาเว็บหลัก (UI) - จะแสดงผลหลังจากป้อนรหัสผ่านถูกแล้วเท่านั้น
+# 3. ส่วนหน้าตาเว็บหลัก (UI)
 # ==========================================
-# เพิ่มปุ่ม Log out ไว้ที่มุมขวาบน
 col_title, col_logout = st.columns([9, 1])
 with col_title:
     st.title("ระบบวิเคราะห์และสรุปสถิติเอกสารจับกุมอัตโนมัติ 👮‍♂️📊")
@@ -113,16 +107,26 @@ with col_left:
                 extracted_text = " ".join(results)
                 
             elif file_type == "pdf":
+                # อ่านไฟล์เก็บไว้ในหน่วยความจำ
+                pdf_bytes = uploaded_file.read()
+                
+                # วิธีที่ 1: ดึงข้อความจากดิจิทัล PDF ปกติก่อน
                 with pdfplumber.open(uploaded_file) as pdf:
                     for page in pdf.pages:
                         text = page.extract_text()
                         if text:
                             extracted_text += text + "\n"
                 
+                # วิธีที่ 2: ถ้าไม่มีข้อความเลย (เป็น PDF สแกน) แปลงหน้า PDF เป็นภาพด้วย PyMuPDF แล้วทำ OCR
                 if extracted_text.strip() == "":
-                    pdf_bytes = uploaded_file.read()
-                    images = convert_from_bytes(pdf_bytes)
-                    for img in images:
+                    st.info("ℹ️ ตรวจพบว่าเป็น PDF รูปภาพ/สแกน ระบบกำลังประมวลผลด้วย OCR...")
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    
+                    for page_num in range(len(doc)):
+                        page = doc.load_page(page_num)
+                        pix = page.get_pixmap(dpi=150) # ปรับความคมชัดระดับกำลังดีสำหรับทำ OCR
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        
                         img_np = np.array(img)
                         results = reader.readtext(img_np, detail=0)
                         extracted_text += " ".join(results) + "\n"
