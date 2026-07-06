@@ -7,12 +7,12 @@ import re
 import pandas as pd
 import fitz  # PyMuPDF
 
-st.set_page_config(page_title="ระบบวิเคราะห์เอกสารจับกุม (เวอร์ชันเสถียร)", layout="wide")
+st.set_page_config(page_title="ระบบวิเคราะห์เอกสารจับกุม (เวอร์ชันเสถียรที่สุด)", layout="wide")
 
 # ==========================================
 # 0. ระบบตรวจสอบการเข้าสู่ระบบ (Authentication)
 # ==========================================
-PASSWORD_TRUE = "Ryoarrest1996"  # รหัสผ่านสำหรับเข้าใช้งานระบบของคุณ
+PASSWORD_TRUE = "Ryoarrest1966"  # 🔑 รหัสผ่านสำหรับเข้าใช้งานระบบของคุณ
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -49,14 +49,14 @@ if 'arrest_history' not in st.session_state:
     st.session_state.arrest_history = pd.DataFrame(columns=['ชื่อไฟล์', 'วันที่จับกุม', 'สัญชาติ', 'สถานที่จับกุม'])
 
 # ==========================================
-# 2. ฟังก์ชันช่วยค้นหาข้อมูล (Regex) พร้อมระบบแก้คำผิด
+# 2. ฟังก์ชันดึงข้อมูล (Regex) พร้อมระบบแก้คำผิดอัตโนมัติ
 # ==========================================
 def extract_arrest_info(text):
     nationality = "ไม่พบข้อมูลสัญชาติ"
     location = "ไม่พบข้อมูลสถานที่จับกุม"
     arrest_date = "ไม่พบข้อมูลวันที่"
     
-    # ลบช่องว่างส่วนเกินเพื่อยืดหยุ่นในการหาคำ
+    # ลบช่องว่างส่วนเกินทั้งหมดเพื่อให้ค้นหาคำได้แม่นยำขึ้น
     clean_text = re.sub(r'\s+', ' ', text)
     
     # 2.1 ค้นหาสัญชาติ
@@ -64,17 +64,17 @@ def extract_arrest_info(text):
     if nat_match:
         nationality = nat_match.group(1).strip()
         
-        # 🔥 แก้ไขปัญหา AI อ่านสัญชาติผิด (Auto-Correction)
-        if nationality == "กัมขชา" or "กัมพ" in nationality:
+        # 🔥 ดักจับระบบ OCR อ่านเพี้ยน แล้วแก้ไขให้ถูกต้องอัตโนมัติ
+        if nationality == "กัมขชา" or "กัมพ" in nationality or "กัม" in nationality:
             nationality = "กัมพูชา"
-        elif "เมียน" in nationality or "เมียนม" in nationality:
+        elif "เมียน" in nationality or "เมียนม" in nationality or "พม่า" in nationality:
             nationality = "เมียนมา"
         elif "ลาว" in nationality:
             nationality = "ลาว"
         elif "ไท" in nationality:
             nationality = "ไทย"
         
-    # 2.2 ค้นหาสถานที่จับกุม
+    # 2.2 ค้นหาสถานที่จับกุม (ตัดคำยืดหยุ่นเมื่อเจอ พฤติการณ์ หรือ วันที่)
     loc_match = re.search(r"(?:สถานที่จับกุม|จับกุมได้ที่|บริเวณ)\s*(.+?)(?:\s+เมื่อ|วันที่|เวลา|พฤติการณ์|\n|$)", clean_text)
     if loc_match:
         location = loc_match.group(1).strip()
@@ -84,6 +84,7 @@ def extract_arrest_info(text):
     if date_match:
         arrest_date = date_match.group(1).strip()
     else:
+        # แผนสำรองถ้ารูปแบบวันที่เขียนติดกันมาก
         date_fallback = re.search(r"(\d{1,2}\s*[ก-ฮ]{1,3}\.[ค-ศ]\.?\s*\d{4})", clean_text)
         if date_fallback:
             arrest_date = date_fallback.group(1).strip()
@@ -91,7 +92,7 @@ def extract_arrest_info(text):
     return nationality, location, arrest_date
 
 # ==========================================
-# 3. ส่วนหน้าตาเว็บหลัก (UI)
+# 3. ส่วนแสดงผลหน้าเว็บ (UI)
 # ==========================================
 col_title, col_logout = st.columns([9, 1])
 with col_title:
@@ -115,7 +116,7 @@ with col_left:
         file_name = uploaded_file.name
         file_type = file_name.split('.')[-1].lower()
         
-        with st.spinner("🔍 AI กำลังแกะข้อความจากเอกสาร..."):
+        with st.spinner("🔍 AI กำลังแกะข้อความจากเอกสารทั้งหมด..."):
             if file_type in ["png", "jpg", "jpeg"]:
                 image = Image.open(uploaded_file)
                 image_np = np.array(image)
@@ -125,14 +126,14 @@ with col_left:
             elif file_type == "pdf":
                 pdf_bytes = uploaded_file.read()
                 
-                # ลองดึงข้อความปกติก่อน
+                # ดึงข้อความกรณีเป็นไฟล์ PDF แบบดิจิทัลธรรมดา
                 with pdfplumber.open(uploaded_file) as pdf:
                     for page in pdf.pages:
                         text = page.extract_text()
                         if text:
                             extracted_text += text + "\n"
                 
-                # ถ้าเป็น PDF สแกน ให้แปลงหน้าเป็นภาพแล้วทำ OCR
+                # หากดึงไม่ได้เลย แปลว่าเเป็น PDF รูปภาพ/สแกน -> วนลูปทำ OCR ทุกหน้า
                 if extracted_text.strip() == "":
                     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                     for page_num in range(len(doc)):
@@ -148,6 +149,7 @@ with col_left:
         else:
             st.success("📝 อ่านเอกสารสำเร็จ!")
             
+            # ดึงข้อมูลจากข้อความที่รวมทุกหน้าแล้ว
             nat, loc, date = extract_arrest_info(extracted_text)
             
             st.info(f"**📌 ผลลัพธ์จากไฟล์: {file_name}**")
@@ -169,7 +171,7 @@ with col_left:
                 else:
                     st.warning("⚠️ ไฟล์นี้เคยถูกบันทึกในระบบสถิติแล้ว")
 
-            with st.expander("🔍 ดูข้อความดิบที่ระบบถอดออกมา"):
+            with st.expander("🔍 ดูข้อความดิบทั้งหมดที่ระบบถอดออกมา"):
                 st.text(extracted_text)
 
 with col_right:
