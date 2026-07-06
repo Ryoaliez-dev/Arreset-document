@@ -1,0 +1,8 @@
+streamlit
+pdfplumber
+easyocr
+pillow
+pdf2image
+numpy
+pandas
+scikit-learn
