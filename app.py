@@ -23,7 +23,7 @@ def login_form():
     
     _, col_center, _ = st.columns([1, 2, 1])
     with col_center:
-        user_password = st.text_input("รหัสผ่านผู้ใช้งาน:", type="password")
+        user_password = st.text_input("รหัสผ่านผู้ใช้งาน:", type="Ryoarrest1996")
         if st.button("เข้าสู่ระบบ 🚀", use_container_width=True):
             if user_password == PASSWORD_TRUE:
                 st.session_state.logged_in = True
