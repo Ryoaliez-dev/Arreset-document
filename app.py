@@ -94,13 +94,11 @@ def extract_arrest_info(text):
         
     return nationality, location, detected_count
 
-# 🔥 ฟังก์ชันสร้างไฟล์ Excel แบบล็อกตำแหน่งช่องและคอลัมน์ตรงตามแบบฟอร์มจริงของพี่เป๊ะๆ
+# 🔥 ฟังก์ชันสร้างไฟล์ Excel ที่จัดตำแหน่งคอลัมน์ทั้ง 12 ช่องให้ตรงล็อกแบบฟอร์ม Merge Cells เป๊ะๆ
 def build_full_excel(data_list):
-    columns_list = [
-        'สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา พท.ตอนใน', 'ผู้ต้องหา พท.ติดชายแดน',
-        'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ พื้นที่ช่องทาง', 'การลักลอบ เข้ามาเอง',
-        'การลักลอบ มีผู้นำเข้า', 'เดินทาง มาก่อน 1 ต.ค.06', 'หมายเหตุ'
-    ]
+    # ปรับตำแหน่งหัวตารางแถวที่ 1 และ 2 ให้สอดรับกับการผสานเซลล์ของฟอร์มต้นฉบับ
+    header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
+    header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
     
     body_rows = []
     total_count = 0
@@ -113,28 +111,128 @@ def build_full_excel(data_list):
         pht_in = count if not is_empty else 0
         prov = "กรุงเทพมหานคร" if not is_empty else "-"
         
+        # จัดเรียงข้อมูลให้ตรงล็อกตามคอลัมน์หัวตาราง
         body_rows.append([
-            row['สน.'],
-            count if count > 0 else 0,
-            row['สัญชาติ'],
-            pht_in,
-            0,
-            row['สถานที่ที่จับกุม'],
-            prov,
-            "-", "-", "-", "-", "-"
+            row['สน.'],                     # คอลัมน์ 0: สน.
+            count if count > 0 else 0,     # คอลัมน์ 1: ผู้ต้องหา (คน)
+            row['สัญชาติ'],                 # คอลัมน์ 2: สัญชาติ
+            pht_in,                         # คอลัมน์ 3: ผู้ต้องหา พท.ตอนใน
+            0,                              # คอลัมน์ 4: ผู้ต้องหา พท.ติดชายแดน
+            row['สถานที่ที่จับกุม'],         # คอลัมน์ 5: สถานที่ที่จับกุม
+            prov,                           # คอลัมน์ 6: จังหวัด
+            "-",                            # คอลัมน์ 7: พื้นที่ช่องทาง
+            "-",                            # คอลัมน์ 8: เข้ามาเอง
+            "-",                            # คอลัมน์ 9: มีผู้นำเข้า
+            "-",                            # คอลัมน์ 10: มาก่อน 1 ต.ค.06
+            "-"                             # คอลัมน์ 11: หมายเหตุ
         ])
         
-    # เพิ่มแถว "รวม" สรุปยอดท้ายตาราง
-    body_rows.append([
-        'รวม', total_count, '', total_count, 0, '', '', '', '', '', '', ''
-    ])
+    # เพิ่มแถว "รวม" สรุปยอดท้ายตารางให้ตรงช่อง
+    footer_row = ['รวม', total_count, '', total_count, 0, '', '', '', '', '', '', '']
     
-    # สร้าง DataFrame ข้อมูลหลัก
-    df_body = pd.DataFrame(body_rows, columns=columns_list)
+    # รวมหัวตารางแถว 1, แถว 2, ข้อมูล และแถวสรุปท้าย
+    df_final_excel = pd.DataFrame([header_row1, header_row2] + body_rows + [footer_row])
     
-    # สร้างโครงสร้างแถวหัวตาราง 2 ชั้นภาษาไทย เพื่อจัดล็อกคอลัมน์ให้ตรงช่องพอดี
-    header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
-    header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
-    
-    # รวมหัวตารางและเนื้อหาเข้าด้วยกันอย่างเป็นระบบ
-    df_final
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_final_excel.to_excel(writer, index=False, header=False, sheet_name='Sheet1')
+    return output.getvalue()
+
+# ==========================================
+# 3. ส่วนแสดงผลหน้าเว็บ (UI)
+# ==========================================
+col_title, col_logout = st.columns([9, 1])
+with col_title:
+    st.title("ระบบวิเคราะห์และกรอกสถิติเอกสารจับกุมแยกตาม สน. 👮‍♂️📊")
+with col_logout:
+    if st.button("ออกจากระบบ 🚪"):
+        st.session_state.logged_in = False
+        st.rerun()
+
+st.write("ระบบดึงสัญชาติและจำนวนคนอัตโนมัติ พร้อมแตกแถวใหม่เมื่อตรวจเจอหลายสัญชาติใน สน. เดียวกัน")
+st.markdown("---")
+
+col_left, col_right = st.columns([1, 1])
+
+with col_left:
+    st.subheader("📥 ส่วนอัปโหลดและวิเคราะห์ไฟล์")
+    uploaded_file = st.file_uploader("อัปโหลดไฟล์ PDF หรือรูปภาพบันทึกการจับกุม", type=["pdf", "png", "jpg", "jpeg"])
+
+    if uploaded_file is not None:
+        extracted_text = ""
+        file_name = uploaded_file.name
+        file_type = file_name.split('.')[-1].lower()
+        
+        with st.spinner("🔍 AI กำลังวิเคราะห์เอกสาร..."):
+            if file_type in ["png", "jpg", "jpeg"]:
+                image = Image.open(uploaded_file)
+                image_np = np.array(image)
+                results = reader.readtext(image_np, detail=0)
+                extracted_text = " ".join(results)
+            elif file_type == "pdf":
+                pdf_bytes = uploaded_file.read()
+                with pdfplumber.open(uploaded_file) as pdf:
+                    for page in pdf.pages:
+                        text = page.extract_text()
+                        if text:
+                            extracted_text += text + "\n"
+                
+                if extracted_text.strip() == "":
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    for page_num in range(len(doc)):
+                        page = doc.load_page(page_num)
+                        pix = page.get_pixmap(dpi=150)
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        img_np = np.array(img)
+                        results = reader.readtext(img_np, detail=0)
+                        extracted_text += " ".join(results) + "\n"
+
+        if extracted_text.strip() == "":
+            st.error("❌ ไม่สามารถดึงข้อความออกมาได้")
+        else:
+            st.success("📝 อ่านเอกสารสำเร็จ!")
+            
+            nat, loc, final_count = extract_arrest_info(extracted_text)
+            
+            st.info(f"**📌 ตรวจสอบและยืนยันข้อมูลความถูกต้องก่อนบันทึก:**")
+            
+            edit_nat = st.selectbox("🏳️‍🌈 ยืนยันสัญชาติที่ตรวจพบ:", ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"], index=["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"].index(nat) if nat in ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"] else 3)
+            user_count = st.number_input("🔢 จำนวนผู้ต้องหาในคดีนี้ (คน):", min_value=1, value=final_count, step=1)
+            edit_loc = st.text_input("📍 สถานที่จับกุม:", value=loc)
+            
+            detected_station = "ท่าเรือ"  
+            for station in STATIONS:
+                if station in extracted_text:
+                    detected_station = station
+                    break
+            
+            st.warning(f"ระบบจะนำข้อมูลจำนวน **{user_count} คน** สัญชาติ **{edit_nat}** ไปบันทึกที่ช่องของ **สน.{detected_station}**")
+
+            if st.button("💾 บันทึกข้อมูลเข้าตารางรายงาน"):
+                current_list = st.session_state.report_data
+                target_indices = [i for i, row in enumerate(current_list) if row['สน.'] == detected_station]
+                
+                inserted = False
+                if target_indices:
+                    for idx in target_indices:
+                        if current_list[idx]['สัญชาติ'] == '-':
+                            current_list[idx]['ผู้ต้องหา (คน)'] = user_count
+                            current_list[idx]['สัญชาติ'] = edit_nat
+                            current_list[idx]['สถานที่ที่จับกุม'] = edit_loc
+                            inserted = True
+                            break
+                        elif current_list[idx]['สัญชาติ'] == edit_nat:
+                            current_list[idx]['ผู้ต้องหา (คน)'] += user_count
+                            if edit_loc not in current_list[idx]['สถานที่ที่จับกุม']:
+                                current_list[idx]['สถานที่ที่จับกุม'] += f", {edit_loc}"
+                            inserted = True
+                            break
+                    
+                    if not inserted:
+                        last_idx = target_indices[-1]
+                        new_row = {
+                            'สน.': detected_station,
+                            'ผู้ต้องหา (คน)': user_count,
+                            'สัญชาติ': edit_nat,
+                            'สถานที่ที่จับกุม': edit_loc
+                        }
