@@ -8,7 +8,7 @@ import pandas as pd
 import fitz  # PyMuPDF
 import io
 
-st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวแยกตาม สน. (เวอร์ชันเร่งสปีด)", layout="wide")
+st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวแยกตาม สน. (เวอร์ชัน Multi-Upload)", layout="wide")
 
 # ==========================================
 # 0. ระบบตรวจสอบการเข้าสู่ระบบ (Authentication)
@@ -38,7 +38,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# 1. โหลดตัวอ่าน OCR ภาษาไทย และ อังกฤษ (เรียกใช้ครั้งเดียว)
+# 1. โหลดตัวอ่าน OCR ภาษาไทย และ อังกฤษ
 # ==========================================
 @st.cache_resource
 def load_ocr_reader():
@@ -57,13 +57,14 @@ if 'report_data' not in st.session_state:
         base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
     st.session_state.report_data = base_list
 
-if 'current_extracted_text' not in st.session_state:
-    st.session_state.current_extracted_text = None
-if 'last_uploaded_file_name' not in st.session_state:
-    st.session_state.last_uploaded_file_name = None
+# ล็อกหน่วยความจำเพื่อเก็บรายการคดีที่วิเคราะห์ได้จากหลาย ๆ ไฟล์
+if 'batch_results' not in st.session_state:
+    st.session_state.batch_results = []
+if 'processed_files' not in st.session_state:
+    st.session_state.processed_files = set()
 
 # ==========================================
-# 2. ฟังก์ชันดึงข้อมูลพร้อมคลินิกซ่อมคำสะกดผิด
+# 2. ฟังก์ชันดึงข้อมูลพร้อมระบบซ่อมคำ
 # ==========================================
 def extract_arrest_info(text):
     nationality = "อื่น ๆ"
@@ -71,7 +72,6 @@ def extract_arrest_info(text):
     detected_count = 1
     
     clean_text = re.sub(r'\s+', '', text)
-    
     if any(k in clean_text for k in ["กัมพูชา", "กัมขชา", "กัมขชำ", "กัมศูชา", "กัม"]):
         nationality = "กัมพูชา"
     elif any(k in clean_text for k in ["เมียนมา", "เมียน", "พม่า"]):
@@ -83,8 +83,6 @@ def extract_arrest_info(text):
     loc_match = re.search(r"(?:สถานที่จับกุม|สถานทีจับกุม|จับกุมได้ที่|บริเวณ|บริเาณ)\s*(.+?)(?:\s+เมื่อ|วันที่|วันที|เวลา|พฤติการณ์|เจ้าพนักงาน|\n|$)", clean_space_text)
     if loc_match:
         location = loc_match.group(1).strip()
-        
-        # 🔥 คลินิกซ่อมคำสะกดผิดจากการแกะภาพลายมือ
         location = location.replace("บริเาณ", "บริเวณ").replace("ชมชน", "ชุมชน").replace("แเขวง", "แขวง")
         location = location.replace("สามัคที", "สามัคคี").replace("สามัคทิ", "สามัคคี")
         
@@ -101,23 +99,18 @@ def extract_arrest_info(text):
 def build_full_excel(data_list):
     header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
     header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
-    
     body_rows = []
     total_count = 0
-    
     for row in data_list:
         count = row['ผู้ต้องหา (คน)']
         total_count += count
         is_empty = (row['สัญชาติ'] == '-')
         pht_in = count if not is_empty else 0
         prov = "กรุงเทพมหานคร" if not is_empty else "-"
-        
         body_rows.append([row['สน.'], count if count > 0 else 0, row['สัญชาติ'], pht_in, 0, row['สถานที่ที่จับกุม'], prov, "-", "-", "-", "-", "-"])
-        
     footer_row = ['รวม', total_count, '', total_count, 0, '', '', '', '', '', '', '']
     all_table_data = [header_row1, header_row2] + body_rows + [footer_row]
     df_final_excel = pd.DataFrame(all_table_data)
-    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_final_excel.to_excel(writer, index=False, header=False, sheet_name='Sheet1')
@@ -132,132 +125,137 @@ with col_title:
 with col_logout:
     if st.button("ออกจากระบบ 🚪"):
         st.session_state.logged_in = False
-        st.session_state.current_extracted_text = None
-        st.session_state.last_uploaded_file_name = None
+        st.session_state.batch_results = []
+        st.session_state.processed_files = set()
         st.rerun()
 
-st.write("ระบบดึงข้อมูลอัตโนมัติพร้อมระบบคัดกรองคำสะกดผิดจากการแกะลายมือเอกสาร")
 st.markdown("---")
-
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
-    st.subheader("📥 ส่วนอัปโหลดและวิเคราะห์ไฟล์")
-    uploaded_file = st.file_uploader("อัปโหลดไฟล์ PDF หรือรูปภาพบันทึกการจับกุม", type=["pdf", "png", "jpg", "jpeg"])
+    st.subheader("📥 ส่วนอัปโหลดคดีจับกุม (เลือกได้หลายไฟล์พร้อมกัน)")
+    
+    # ⚡ เปิดฟังก์ชัน accept_multiple_files=True เพื่อให้ลากไฟล์ใส่ได้ไม่จำกัด
+    uploaded_files = st.file_uploader("ลากไฟล์รูปภาพหรือ PDF บันทึกการจับกุมทั้งหมดมาวางที่นี่", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
-    if uploaded_file is not None:
-        file_name = uploaded_file.name
-        file_type = file_name.split('.')[-1].lower()
-        
-        if st.session_state.last_uploaded_file_name != file_name:
-            extracted_text = ""
-            with st.spinner("🔍 AI กำลังวิเคราะห์เอกสารในรอบแรก (ใช้เวลาสักครู่)..."):
-                if file_type in ["png", "jpg", "jpeg"]:
-                    image = Image.open(uploaded_file)
-                    image_np = np.array(image)
-                    results = reader.readtext(image_np, detail=0)
-                    extracted_text = " ".join(results)
-                elif file_type == "pdf":
-                    pdf_bytes = uploaded_file.read()
-                    with pdfplumber.open(uploaded_file) as pdf:
-                        for page in pdf.pages:
-                            text = page.extract_text()
-                            if text:
-                                extracted_text += text + "\n"
+    if uploaded_files:
+        # วิ่งลูปสแกนคดีทีละไฟล์เฉพาะไฟล์ใหม่ที่ยังไม่เคยโดนเปิดอ่าน
+        for f in uploaded_files:
+            if f.name not in st.session_state.processed_files:
+                extracted_text = ""
+                file_type = f.name.split('.')[-1].lower()
+                
+                with st.spinner(f"🔍 AI กำลังวิเคราะห์ไฟล์: {f.name}..."):
+                    if file_type in ["png", "jpg", "jpeg"]:
+                        image = Image.open(f)
+                        image_np = np.array(image)
+                        results = reader.readtext(image_np, detail=0)
+                        extracted_text = " ".join(results)
+                    elif file_type == "pdf":
+                        pdf_bytes = f.read()
+                        with pdfplumber.open(f) as pdf:
+                            for page in pdf.pages:
+                                text = page.extract_text()
+                                if text: extracted_text += text + "\n"
+                        if extracted_text.strip() == "":
+                            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            for page_num in range(len(doc)):
+                                page = doc.load_page(page_num)
+                                pix = page.get_pixmap(dpi=150)
+                                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                                img_np = np.array(img)
+                                results = reader.readtext(img_np, detail=0)
+                                extracted_text += " ".join(results) + "\n"
+                
+                if extracted_text.strip() != "":
+                    nat, loc, final_count = extract_arrest_info(extracted_text)
+                    detected_station = "ท่าเรือ"  
+                    for station in STATIONS:
+                        if station in extracted_text:
+                            detected_station = station
+                            break
                     
-                    if extracted_text.strip() == "":
-                        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        for page_num in range(len(doc)):
-                            page = doc.load_page(page_num)
-                            pix = page.get_pixmap(dpi=150)
-                            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                            img_np = np.array(img)
-                            results = reader.readtext(img_np, detail=0)
-                            extracted_text += " ".join(results) + "\n"
-            
-            st.session_state.current_extracted_text = extracted_text
-            st.session_state.last_uploaded_file_name = file_name
-        
-        main_text = st.session_state.current_extracted_text
+                    # เก็บผลลัพธ์ของคดีจากไฟล์นี้เข้าคลังชั่วคราว
+                    st.session_state.batch_results.append({
+                        'file_name': f.name, 'สน.': detected_station,
+                        'สัญชาติ': nat, 'จำนวน': final_count, 'สถานที่': loc
+                    })
+                st.session_state.processed_files.add(f.name)
 
-        if main_text.strip() == "":
-            st.error("❌ ไม่สามารถดึงข้อความออกมาได้")
-        else:
-            st.success("📝 อ่านเอกสารสำเร็จ!")
-            nat, loc, final_count = extract_arrest_info(main_text)
+        # แสดงรายการคดีที่วิเคราะห์ได้ทั้งหมด เพื่อรอให้พี่ตรวจสอบและอนุมัติเข้าตารางสรุป
+        if st.session_state.batch_results:
+            st.success(f"📝 AI วิเคราะห์เสร็จสิ้นรวมทั้งหมด {len(st.session_state.batch_results)} คดี")
+            st.info("💡 ท่านสามารถตรวจสอบข้อมูลแต่ละคดีด้านล่างนี้ และกดบันทึกทั้งหมดเข้าตารางสรุปได้ทันทีครับ")
             
-            st.info(f"**📌 ตรวจสอบและยืนยันข้อมูลความถูกต้องก่อนบันทึก:**")
-            
-            edit_nat = st.selectbox("🏳️‍🌈 ยืนยันสัญชาติที่ตรวจพบ:", ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"], index=["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"].index(nat) if nat in ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"] else 3)
-            user_count = st.number_input("🔢 จำนวนผู้ต้องหาในคดีนี้ (คน):", min_value=1, value=final_count, step=1)
-            edit_loc = st.text_input("📍 สถานที่จับกุม:", value=loc)
-            
-            detected_station = "ท่าเรือ"  
-            for station in STATIONS:
-                if station in main_text:
-                    detected_station = station
-                    break
-            
-            st.warning(f"ระบบจะนำข้อมูลจำนวน **{user_count} คน** สัญชาติ **{edit_nat}** ไปบันทึกที่ช่องของ **สน.{detected_station}**")
+            # วิ่งแสดงผลกล่องยืนยันแยกตามรายคดี
+            for i, res in enumerate(st.session_state.batch_results):
+                with st.expander(f"📦 คดีที่ {i+1} จากไฟล์: {res['file_name']}", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        res['สัญชาติ'] = st.selectbox(f"สัญชาติคดีที่ {i+1}:", ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"], index=["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"].index(res['สัญชาติ']) if res['สัญชาติ'] in ["กัมพูชา", "เมียนมา", "ลาว", "อื่น ๆ"] else 3, key=f"nat_{i}")
+                    with col2:
+                        res['จำนวน'] = st.number_input(f"จำนวน (คน) คดีที่ {i+1}:", min_value=1, value=res['จำนวน'], step=1, key=f"cnt_{i}")
+                    with col3:
+                        res['สน.'] = st.selectbox(f"ลงสถานี คดีที่ {i+1}:", STATIONS, index=STATIONS.index(res['สน.']), key=f"st_{i}")
+                    res['สถานที่'] = st.text_input(f"สถานที่จับกุม คดีที่ {i+1}:", value=res['สถานที่'], key=f"loc_{i}")
 
-            if st.button("💾 บันทึกข้อมูลเข้าตารางรายงาน"):
+            # 🚀 ปุ่มเด็ด: กดทีเดียว อนุมัติข้อมูลทุกไฟล์วิ่งเข้าตารางฝั่งขวาทันทีในคลิกเดียว!
+            if st.button("💾 บันทึกทุกคดีเข้าตารางรายงานพร้อมกัน", type="primary", use_container_width=True):
                 current_list = st.session_state.report_data
-                target_indices = [i for i, row in enumerate(current_list) if row['สน.'] == detected_station]
                 
-                inserted = False
-                if target_indices:
-                    for idx in target_indices:
-                        if current_list[idx]['สัญชาติ'] == '-':
-                            current_list[idx]['ผู้ต้องหา (คน)'] = user_count
-                            current_list[idx]['สัญชาติ'] = edit_nat
-                            current_list[idx]['สถานที่ที่จับกุม'] = edit_loc
-                            inserted = True
-                            break
-                        elif current_list[idx]['สัญชาติ'] == edit_nat:
-                            current_list[idx]['ผู้ต้องหา (คน)'] += user_count
-                            if edit_loc not in current_list[idx]['สถานที่ที่จับกุม']:
-                                current_list[idx]['สถานที่ที่จับกุม'] += f", {edit_loc}"
-                            inserted = True
-                            break
+                for res in st.session_state.batch_results:
+                    target_station = res['สน.']
+                    user_count = res['จำนวน']
+                    edit_nat = res['สัญชาติ']
+                    edit_loc = res['สถานที่']
                     
-                    if not inserted:
-                        last_idx = target_indices[-1]
-                        new_row = {'สน.': detected_station, 'ผู้ต้องหา (คน)': user_count, 'สัญชาติ': edit_nat, 'สถานที่ที่จับกุม': edit_loc}
-                        current_list.insert(last_idx + 1, new_row)
-                
+                    target_indices = [idx for idx, row in enumerate(current_list) if row['สน.'] == target_station]
+                    inserted = False
+                    if target_indices:
+                        for idx in target_indices:
+                            if current_list[idx]['สัญชาติ'] == '-':
+                                current_list[idx]['ผู้ต้องหา (คน)'] = user_count
+                                current_list[idx]['สัญชาติ'] = edit_nat
+                                current_list[idx]['สถานที่ที่จับกุม'] = edit_loc
+                                inserted = True
+                                break
+                            elif current_list[idx]['สัญชาติ'] == edit_nat:
+                                current_list[idx]['ผู้ต้องหา (คน)'] += user_count
+                                if edit_loc not in current_list[idx]['สถานที่ที่จับกุม']:
+                                    current_list[idx]['สถานที่ที่จับกุม'] += f", {edit_loc}"
+                                inserted = True
+                                break
+                        if not inserted:
+                            last_idx = target_indices[-1]
+                            new_row = {'สน.': target_station, 'ผู้ต้องหา (คน)': user_count, 'สัญชาติ': edit_nat, 'สถานที่ที่จับกุม': edit_loc}
+                            current_list.insert(last_idx + 1, new_row)
+                            
                 st.session_state.report_data = current_list
-                st.success(f"บันทึกข้อมูลสำเร็จ!")
+                st.session_state.batch_results = [] # เคลียร์กล่องพักข้อมูลหลังเซฟเสร็จ
+                st.success("บันทึกข้อมูลทุกไฟล์ลงตารางสำเร็จ!")
                 st.rerun()
-
     else:
-        st.session_state.current_extracted_text = None
-        st.session_state.last_uploaded_file_name = None
+        # ถ้าเคลียร์ช่องอัปโหลด ให้ล้างความจำไฟล์เก่า
+        st.session_state.batch_results = []
+        st.session_state.processed_files = set()
 
 with col_right:
-    st.subheader("📋 ตารางแสดงผลบนหน้าเว็บ")
-    
+    st.subheader("📋 ตารางแสดงผลรายงานภาพรวม")
     df_show = pd.DataFrame(st.session_state.report_data)
     sum_value = df_show['ผู้ต้องหา (คน)'].sum()
     total_row_web = pd.DataFrame([{'สน.': 'รวม', 'ผู้ต้องหา (คน)': sum_value, 'สัญชาติ': '', 'สถานที่ที่จับกุม': ''}])
     df_final = pd.concat([df_show, total_row_web], ignore_index=True)
-    
     st.dataframe(df_final, use_container_width=True)
     
     if not df_show.empty and sum_value > 0:
         excel_data = build_full_excel(st.session_state.report_data)
-        st.download_button(
-            label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
-            data=excel_data,
-            file_name="แบบรายงานการจับกุมต่างด้าว_ฟอร์มจริง.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)", data=excel_data, file_name="แบบรายงานการจับกุมต่างด้าว_รวมทุกสน.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     
-    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด", type="primary", use_container_width=True):
+    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด", use_container_width=True):
         base_list = []
         for station in STATIONS:
             base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
         st.session_state.report_data = base_list
-        st.session_state.current_extracted_text = None
-        st.session_state.last_uploaded_file_name = None
+        st.session_state.batch_results = []
+        st.session_state.processed_files = set()
         st.rerun()
