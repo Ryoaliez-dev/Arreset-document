@@ -63,7 +63,7 @@ if 'report_data' not in st.session_state:
     st.session_state.report_data = base_list
 
 # ==========================================
-# 2. ฟังก์ชันดึงข้อมูล (ปรับปรุงการตรวจจับสัญชาติแบบอัจฉริยะ)
+# 2. ฟังก์ชันดึงข้อมูลจากเอกสาร
 # ==========================================
 def extract_arrest_info(text):
     nationality = "อื่น ๆ"
@@ -95,7 +95,7 @@ def extract_arrest_info(text):
         
     return nationality, location, detected_count
 
-# 🔥 ฟังก์ชันสร้างไฟล์ Excel แก้ไขระบบให้ทำงานถูกต้องไม่พังเบื้องหลัง
+# 🔥 ฟังก์ชันสร้างไฟล์ Excel เวอร์ชันซ่อมระบบจับคอลัมน์ให้ตรงกัน ไม่แครช
 def build_full_excel(data_list):
     header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
     header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
@@ -124,7 +124,7 @@ def build_full_excel(data_list):
         
     footer_row = ['รวม', total_count, '', total_count, 0, '', '', '', '', '', '', '']
     
-    # แก้ไขตรงนี้: ผสานโครงสร้างทั้งหมดเป็น List เดียวกันก่อนส่งเข้า DataFrame เพื่อไม่ให้ระบบหลังบ้านแครช
+    # รวมแถวข้อมูลทั้งหมดเข้าด้วยกัน
     all_table_data = [header_row1, header_row2] + body_rows + [footer_row]
     df_final_excel = pd.DataFrame(all_table_data)
     
@@ -240,26 +240,25 @@ with col_left:
 with col_right:
     st.subheader("📋 ตารางแสดงผลบนหน้าเว็บ (ฉบับย่อ)")
     
+    # แสดงผลตารางสรุปย่อบนเว็บให้ทำงานแยกจากฟังก์ชันดาวน์โหลดเพื่อความเสถียร
     df_show = pd.DataFrame(st.session_state.report_data)
     total_row = pd.DataFrame([{'สน.': 'รวม', 'ผู้ต้องหา (คน)': df_show['ผู้ต้องหา (คน)'].sum(), 'สัญชาติ': '', 'สถานที่ที่จับกุม': ''}])
     df_final = pd.concat([df_show, total_row], ignore_index=True)
     
     st.dataframe(df_final, use_container_width=True, index=False)
     
-    # 📥 ปุ่มดาวน์โหลด Excel ที่เปิดให้แสดงผลได้สมบูรณ์แล้ว
-    try:
-        excel_data = build_full_excel(st.session_state.report_data)
-        st.download_button(
-            label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
-            data=excel_data,
-            file_name="แบบรายงานการจับกุมต่างด้าว_ฟอร์มจริง.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการเตรียมไฟล์ดาวน์โหลด: {e}")
+    # 📥 ปุ่มดาวน์โหลด Excel ฟอร์มจริง คอลัมน์ครบถ้วนตรงช่อง
+    excel_data = build_full_excel(st.session_state.report_data)
+    st.download_button(
+        label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
+        data=excel_data,
+        file_name="แบบรายงานการจับกุมต่างด้าว_ฟอร์มจริง.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
     
-    # 🗑️ ปุ่มรีเซ็ตสีแดง
+    # 🗑️ ปุ่มรีเซ็ตข้อมูลสีแดงแถบกว้างเปิดให้ใช้งานปกติแล้วครับ
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด", type="primary", use_container_width=True):
         base_list = []
         for station in STATIONS:
