@@ -94,26 +94,17 @@ def extract_arrest_info(text):
         
     return nationality, location, detected_count
 
-# 🔥 ฟังก์ชันจัดหน้าสร้างหัวตาราง Excel 2 ชั้นให้ถูกต้องตามแบบฟอร์มจริงของพี่
+# 🔥 ฟังก์ชันสร้างไฟล์ Excel แบบล็อกตำแหน่งช่องและคอลัมน์ตรงตามแบบฟอร์มจริงของพี่เป๊ะๆ
 def build_full_excel(data_list):
-    # 1. สร้างหัวตาราง 2 ชั้นแรกเลียนแบบไฟล์ต้นฉบับ
-    header_rows = [
-        {
-            'C0': 'สน.', 'C1': 'ผู้ต้องหา', 'C2': 'สัญชาติ', 'C3': 'ผู้ต้องหา', 'C4': '', 
-            'C5': 'สถานที่ที่จับกุม', 'C6': 'จังหวัด', 'C7': 'การลักลอบ', 'C8': '', 'C9': '', 
-            'C10': 'เดินทาง', 'C11': 'หมายเหตุ'
-        },
-        {
-            'C0': '', 'C1': '( คน )', 'C2': '', 'C3': 'พท.ตอนใน', 'C4': 'พท.ติดชายแดน', 
-            'C5': '', 'C6': '', 'C7': 'พื้นที่ช่องทาง', 'C8': 'เข้ามาเอง', 'C9': 'มีผู้นำเข้า / นายหน้า', 
-            'C10': 'มาก่อน 1 ต.ค.06', 'C11': ''
-        }
+    columns_list = [
+        'สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา พท.ตอนใน', 'ผู้ต้องหา พท.ติดชายแดน',
+        'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ พื้นที่ช่องทาง', 'การลักลอบ เข้ามาเอง',
+        'การลักลอบ มีผู้นำเข้า', 'เดินทาง มาก่อน 1 ต.ค.06', 'หมายเหตุ'
     ]
     
-    total_count = 0
     body_rows = []
+    total_count = 0
     
-    # 2. นำข้อมูลแต่ละ สน. มาหยอดลงไป
     for row in data_list:
         count = row['ผู้ต้องหา (คน)']
         total_count += count
@@ -122,73 +113,28 @@ def build_full_excel(data_list):
         pht_in = count if not is_empty else 0
         prov = "กรุงเทพมหานคร" if not is_empty else "-"
         
-        body_rows.append({
-            'C0': row['สน.'],
-            'C1': count if count > 0 else 0,
-            'C2': row['สัญชาติ'],
-            'C3': pht_in,
-            'C4': 0,
-            'C5': row['สถานที่ที่จับกุม'],
-            'C6': prov,
-            'C7': "-", 'C8': "-", 'C9': "-", 'C10': "-", 'C11': "-"
-        })
+        body_rows.append([
+            row['สน.'],
+            count if count > 0 else 0,
+            row['สัญชาติ'],
+            pht_in,
+            0,
+            row['สถานที่ที่จับกุม'],
+            prov,
+            "-", "-", "-", "-", "-"
+        ])
         
-    # 3. เพิ่มแถว "รวม" สรุปยอดท้ายตาราง
-    footer_row = {
-        'C0': 'รวม', 'C1': total_count, 'C2': '', 'C3': total_count, 'C4': 0,
-        'C5': '', 'C6': '', 'C7': '', 'C8': '', 'C9': '', 'C10': '', 'C11': ''
-    }
+    # เพิ่มแถว "รวม" สรุปยอดท้ายตาราง
+    body_rows.append([
+        'รวม', total_count, '', total_count, 0, '', '', '', '', '', '', ''
+    ])
     
-    # รวมแถวทั้งหมดเข้าด้วยกัน
-    all_rows = header_rows + body_rows + [footer_row]
+    # สร้าง DataFrame ข้อมูลหลัก
+    df_body = pd.DataFrame(body_rows, columns=columns_list)
     
-    # แปลงเป็น DataFrame โดยไม่ใช้หัวคอลัมน์ภาษาอังกฤษเดิมติดไป
-    df = pd.DataFrame(all_rows)
+    # สร้างโครงสร้างแถวหัวตาราง 2 ชั้นภาษาไทย เพื่อจัดล็อกคอลัมน์ให้ตรงช่องพอดี
+    header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
+    header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
     
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # กำหนด header=False เพื่อให้ระบบใช้หัวตาราง 2 ชั้นที่เราเขียนขึ้นเองในแถวแรก
-        df.to_excel(writer, index=False, header=False, sheet_name='Sheet1')
-    return output.getvalue()
-
-# ==========================================
-# 3. ส่วนแสดงผลหน้าเว็บ (UI)
-# ==========================================
-col_title, col_logout = st.columns([9, 1])
-with col_title:
-    st.title("ระบบวิเคราะห์และกรอกสถิติเอกสารจับกุมแยกตาม สน. 👮‍♂️📊")
-with col_logout:
-    if st.button("ออกจากระบบ 🚪"):
-        st.session_state.logged_in = False
-        st.rerun()
-
-st.write("ระบบดึงสัญชาติและจำนวนคนอัตโนมัติ พร้อมแตกแถวใหม่เมื่อตรวจเจอหลายสัญชาติใน สน. เดียวกัน")
-st.markdown("---")
-
-col_left, col_right = st.columns([1, 1])
-
-with col_left:
-    st.subheader("📥 ส่วนอัปโหลดและวิเคราะห์ไฟล์")
-    uploaded_file = st.file_uploader("อัปโหลดไฟล์ PDF หรือรูปภาพบันทึกการจับกุม", type=["pdf", "png", "jpg", "jpeg"])
-
-    if uploaded_file is not None:
-        extracted_text = ""
-        file_name = uploaded_file.name
-        file_type = file_name.split('.')[-1].lower()
-        
-        with st.spinner("🔍 AI กำลังวิเคราะห์เอกสาร..."):
-            if file_type in ["png", "jpg", "jpeg"]:
-                image = Image.open(uploaded_file)
-                image_np = np.array(image)
-                results = reader.readtext(image_np, detail=0)
-                extracted_text = " ".join(results)
-            elif file_type == "pdf":
-                pdf_bytes = uploaded_file.read()
-                with pdfplumber.open(uploaded_file) as pdf:
-                    for page in pdf.pages:
-                        text = page.extract_text()
-                        if text:
-                            extracted_text += text + "\n"
-                
-                if extracted_text.strip() == "":
-                    doc = fitz.open(stream
+    # รวมหัวตารางและเนื้อหาเข้าด้วยกันอย่างเป็นระบบ
+    df_final
