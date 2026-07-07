@@ -51,21 +51,19 @@ STATIONS = [
     "ทองหล่อ", "คลองตัน", "พระโขนง", "บางนา", "ท่าเรือ", "กก.สส.5"
 ]
 
-# ตั้งค่าที่เก็บสถิติตารางหลัก
 if 'report_data' not in st.session_state:
     base_list = []
     for station in STATIONS:
         base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
     st.session_state.report_data = base_list
 
-# ตั้งค่าตัวเก็บความจำข้อความชั่วคราวเพื่อบล็อกไม่ให้รัน OCR ซ้ำซ้อนตอนกดบันทึก
 if 'current_extracted_text' not in st.session_state:
     st.session_state.current_extracted_text = None
 if 'last_uploaded_file_name' not in st.session_state:
     st.session_state.last_uploaded_file_name = None
 
 # ==========================================
-# 2. ฟังก์ชันดึงข้อมูลแบบสแกนเร็ว
+# 2. ฟังก์ชันดึงข้อมูลพร้อมคลินิกซ่อมคำสะกดผิด
 # ==========================================
 def extract_arrest_info(text):
     nationality = "อื่น ๆ"
@@ -85,7 +83,10 @@ def extract_arrest_info(text):
     loc_match = re.search(r"(?:สถานที่จับกุม|สถานทีจับกุม|จับกุมได้ที่|บริเวณ|บริเาณ)\s*(.+?)(?:\s+เมื่อ|วันที่|วันที|เวลา|พฤติการณ์|เจ้าพนักงาน|\n|$)", clean_space_text)
     if loc_match:
         location = loc_match.group(1).strip()
+        
+        # 🔥 คลินิกซ่อมคำสะกดผิดจากการแกะภาพลายมือ
         location = location.replace("บริเาณ", "บริเวณ").replace("ชมชน", "ชุมชน").replace("แเขวง", "แขวง")
+        location = location.replace("สามัคที", "สามัคคี").replace("สามัคทิ", "สามัคคี")
         
     count_match = re.search(r"(?:จำนวน|รวม|สัญชาติ[\u0e00-\u0e7f]+\s*)\s*(\d+)\s*(?:คน|ราย|นาม)", clean_space_text)
     if count_match:
@@ -97,7 +98,6 @@ def extract_arrest_info(text):
         
     return nationality, location, detected_count
 
-# ฟังก์ชันสร้างไฟล์ Excel ฟอร์มจริง
 def build_full_excel(data_list):
     header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
     header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
@@ -136,7 +136,7 @@ with col_logout:
         st.session_state.last_uploaded_file_name = None
         st.rerun()
 
-st.write("เวอร์ชันเร่งสปีด: ล็อกความจำหลังบ้าน ลดการรัน AI ซ้ำซ้อน ประมวลผลไวขึ้น 10 เท่า")
+st.write("ระบบดึงข้อมูลอัตโนมัติพร้อมระบบคัดกรองคำสะกดผิดจากการแกะลายมือเอกสาร")
 st.markdown("---")
 
 col_left, col_right = st.columns([1, 1])
@@ -149,7 +149,6 @@ with col_left:
         file_name = uploaded_file.name
         file_type = file_name.split('.')[-1].lower()
         
-        # ⚡ เช็กว่าถ้าเป็นไฟล์เดิมที่แกะเสร็จแล้ว ให้ดึงข้อมูลเก่าจาก Memory มาใช้ทันที ไม่ต้องรัน OCR ซ้ำอีก
         if st.session_state.last_uploaded_file_name != file_name:
             extracted_text = ""
             with st.spinner("🔍 AI กำลังวิเคราะห์เอกสารในรอบแรก (ใช้เวลาสักครู่)..."):
@@ -176,11 +175,9 @@ with col_left:
                             results = reader.readtext(img_np, detail=0)
                             extracted_text += " ".join(results) + "\n"
             
-            # บันทึกข้อความลงความจำชั่วคราว
             st.session_state.current_extracted_text = extracted_text
             st.session_state.last_uploaded_file_name = file_name
         
-        # ดึงข้อความดิบจากหน่วยความจำมาประมวลผลกล่องรับข้อมูล
         main_text = st.session_state.current_extracted_text
 
         if main_text.strip() == "":
@@ -203,7 +200,6 @@ with col_left:
             
             st.warning(f"ระบบจะนำข้อมูลจำนวน **{user_count} คน** สัญชาติ **{edit_nat}** ไปบันทึกที่ช่องของ **สน.{detected_station}**")
 
-            # ⚡ ปุ่มบันทึกเวอร์ชันความเร็วแสง: ดึงข้อมูลจากกล่องพิมพ์ปุ๊บหยอดลงตารางฝั่งขวาทันที ไม่รัน OCR ซ้ำแล้ว
             if st.button("💾 บันทึกข้อมูลเข้าตารางรายงาน"):
                 current_list = st.session_state.report_data
                 target_indices = [i for i, row in enumerate(current_list) if row['สน.'] == detected_station]
@@ -234,7 +230,6 @@ with col_left:
                 st.rerun()
 
     else:
-        # หากเอาไฟล์ออก ให้เคลียร์ค่าแคชชั่วคราว
         st.session_state.current_extracted_text = None
         st.session_state.last_uploaded_file_name = None
 
@@ -248,7 +243,6 @@ with col_right:
     
     st.dataframe(df_final, use_container_width=True)
     
-    # ⚡ ระบบสร้างปุ่มดาวน์โหลดแบบหน่วงเวลา (จะทำต่อเมื่อผู้ใช้กดคลิกเท่านั้น ไม่ประมวลผลทิ้งขว้าง)
     if not df_show.empty and sum_value > 0:
         excel_data = build_full_excel(st.session_state.report_data)
         st.download_button(
