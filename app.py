@@ -8,7 +8,7 @@ import pandas as pd
 import fitz  # PyMuPDF
 import io
 
-st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวประจำวัน", layout="wide")
+st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวแยกตาม สน.", layout="wide")
 
 # ==========================================
 # 0. ระบบตรวจสอบการเข้าสู่ระบบ (Authentication)
@@ -46,43 +46,34 @@ def load_ocr_reader():
 
 reader = load_ocr_reader()
 
-# ตั้งค่าสถานีตำรวจเริ่มต้นตามไฟล์ตัวอย่างของพี่
+# รายชื่อ สน. หลักตั้งต้นตามไฟล์ Excel ตัวอย่าง
 STATIONS = [
     "วัดพระยาไกร", "บางโพงพาง", "ทุ่งมหาเมฆ", "ลุมพินี", 
     "ทองหล่อ", "คลองตัน", "พระโขนง", "บางนา", "ท่าเรือ", "กก.สส.5"
 ]
 
-# สร้างโครงสร้างตารางรายงานให้ตรงตามแบบฟอร์ม Excel ของพี่เป๊ะๆ
-if 'report_df' not in st.session_state:
-    base_data = []
+# เริ่มต้นโครงสร้างตารางรายงานแบบไดนามิก (เป็น List เพื่อให้ง่ายต่อการแทรกแถวใหม่)
+if 'report_data' not in st.session_state:
+    base_list = []
     for station in STATIONS:
-        base_data.append({
+        base_list.append({
             'สน.': station,
             'ผู้ต้องหา (คน)': 0,
             'สัญชาติ': '-',
-            'ผู้ต้องหา พท.ตอนใน': 0,
-            'ผู้ต้องหา พท.ติดชายแดน': 0,
-            'สถานที่ที่จับกุม': '-',
-            'จังหวัด': '-',
-            'การลักลอบ เข้ามาเอง': '-',
-            'การลักลอบ มีผู้นำเข้า': '-',
-            'การตรวจ COVID-19': '-',
-            'เดินทางมาก่อน 1963-10-01': '-',
-            'หมายเหตุ': '-'
+            'สถานที่ที่จับกุม': '-'
         })
-    st.session_state.report_df = pd.DataFrame(base_data)
+    st.session_state.report_data = base_list
 
 # ==========================================
-# 2. ฟังก์ชันดึงข้อมูล (Regex) พร้อมระบบแก้คำผิด
+# 2. ฟังก์ชันดึงและซ่อมคำผิดจาก OCR
 # ==========================================
 def extract_arrest_info(text):
     nationality = "ไม่พบข้อมูลสัญชาติ"
     location = "ไม่พบข้อมูลสถานที่จับกุม"
-    arrest_date = "ไม่พบข้อมูลวันที่"
     
     clean_text = re.sub(r'\s+', ' ', text)
     
-    # ดักจับสัญชาติ
+    # ดักจับสัญชาติ + ซ่อมคำเพี้ยน
     if any(k in clean_text for k in ["กัมขชำ", "กัมขชา", "กัมศูชา", "กัมพูชา"]):
         nationality = "กัมพูชา"
     elif "เมียน" in clean_text or "พม่า" in clean_text:
@@ -96,20 +87,8 @@ def extract_arrest_info(text):
         location = loc_match.group(1).strip()
         location = location.replace("บริเาณ", "บริเวณ").replace("ชมชน", "ชุมชน").replace("แเขวง", "แขวง")
         
-    # ดักจับวันที่
-    date_match = re.search(r"(?:วันที่จับกุม|วันทีจับกุม)\s*(\d{1,2}\s*[\u0e00-\u0e7f\.]+\s*\d{4})", clean_text)
-    if date_match:
-        arrest_date = date_match.group(1).strip()
-    else:
-        date_fallback = re.search(r"(\d{1,2}\s*[ก-ฮ]{1,3}\.[ก-ฮn]\.?\s*\d{4})", clean_text)
-        if date_fallback:
-            arrest_date = date_fallback.group(1).strip()
-            
-    arrest_date = arrest_date.replace("ก.n.", "ก.ค.")
-        
-    return nationality, location, arrest_date
+    return nationality, location
 
-# ฟังก์ชันแปลง DataFrame เป็นไฟล์ Excel
 def to_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -121,13 +100,13 @@ def to_excel(df):
 # ==========================================
 col_title, col_logout = st.columns([9, 1])
 with col_title:
-    st.title("ระบบวิเคราะห์และสรุปสถิติเอกสารจับกุมอัตโนมัติ 👮‍♂️📊")
+    st.title("ระบบวิเคราะห์และกรอกสถิติเอกสารจับกุมแยกตาม สน. 👮‍♂️📊")
 with col_logout:
     if st.button("ออกจากระบบ 🚪"):
         st.session_state.logged_in = False
         st.rerun()
 
-st.write("แบบรายงานการจับกุมต่างด้าวหลบหนีเข้าเมือง และคนไทยเข้า - ออกประเทศโดยผิดกฎหมาย")
+st.write("ดึงข้อมูล จำนวน, สัญชาติ, สถานที่จับกุม ลงล็อกตาม สน. (รองรับการแตกแถวใหม่เมื่อสัญชาติซ้ำ)")
 st.markdown("---")
 
 col_left, col_right = st.columns([1, 1])
@@ -141,13 +120,12 @@ with col_left:
         file_name = uploaded_file.name
         file_type = file_name.split('.')[-1].lower()
         
-        with st.spinner("🔍 AI กำลังแกะข้อความจากเอกสารทั้งหมด..."):
+        with st.spinner("🔍 AI กำลังตรวจสอบเอกสาร..."):
             if file_type in ["png", "jpg", "jpeg"]:
                 image = Image.open(uploaded_file)
                 image_np = np.array(image)
                 results = reader.readtext(image_np, detail=0)
                 extracted_text = " ".join(results)
-                
             elif file_type == "pdf":
                 pdf_bytes = uploaded_file.read()
                 with pdfplumber.open(uploaded_file) as pdf:
@@ -171,80 +149,96 @@ with col_left:
         else:
             st.success("📝 อ่านเอกสารสำเร็จ!")
             
-            nat, loc, date = extract_arrest_info(extracted_text)
+            nat, loc = extract_arrest_info(extracted_text)
             
-            st.info(f"**📌 ผลลัพธ์ที่ดึงได้จากไฟล์:**")
+            st.info(f"**📌 ข้อมูลที่ดึงได้สำเร็จ:**")
             st.markdown(f"- 🏳️‍🌈 **สัญชาติ:** {nat}")
             st.markdown(f"- 📍 **สถานที่จับกุม:** {loc}")
             
-            # ตรวจหาชื่อ สน. จากข้อความดิบ (เช่น สน.ท่าเรือ)
-            detected_station = "ท่าเรือ"  # ค่าเริ่มต้นหากตรวจไม่พบ
+            # ตรวจหาว่าคดีนี้เป็นของ สน. ไหน
+            detected_station = "ท่าเรือ"  # ค่าเริ่มต้นหากหาไม่เจอ
             for station in STATIONS:
                 if station in extracted_text:
                     detected_station = station
                     break
             
-            st.warning(f"ระบบจะนำข้อมูลนี้ไปบันทึกที่แถวของ **สน.{detected_station}**")
+            st.warning(f"ระบบจะนำข้อมูลนี้ไปกรอกให้ที่ช่องของ **สน.{detected_station}**")
 
-            if st.button("💾 บันทึกข้อมูลนี้เข้าสู่แบบฟอร์มรายงาน"):
-                # ทำการอัปเดตข้อมูลลงไปในแถวของ สน. นั้นๆ ในตารางรายงาน
-                df = st.session_state.report_df
-                idx = df[df['สน.'] == detected_station].index
-                if len(idx) > 0:
-                    df.loc[idx, 'ผู้ต้องหา (คน)'] += 1
-                    df.loc[idx, 'สัญชาติ'] = nat
-                    df.loc[idx, 'ผู้ต้องหา พท.ตอนใน'] += 1
-                    df.loc[idx, 'สถานที่ที่จับกุม'] = loc
-                    df.loc[idx, 'จังหวัด'] = "กรุงเทพมหานคร" if "กรุงเทพ" in loc or "คลองเตย" in loc else "-"
-                    st.session_state.report_df = df
-                    st.success(f"บันทึกข้อมูลลงช่อง สน.{detected_station} เรียบร้อยแล้ว!")
-                    st.rerun()
+            if st.button("💾 บันทึกข้อมูลเข้าตารางรายงาน"):
+                current_list = st.session_state.report_data
+                
+                # ค้นหาตำแหน่งของ สน. นี้ในตารางปัจจุบัน
+                target_indices = [i for i, row in enumerate(current_list) if row['สน.'] == detected_station]
+                
+                inserted = False
+                if target_indices:
+                    for idx in target_indices:
+                        # กรณีที่ 1: แถวของ สน. นั้นยังว่างอยู่ (ยังไม่มีการบันทึกสัญชาติ) ให้กรอกทับได้เลย
+                        if current_list[idx]['สัญชาติ'] == '-':
+                            current_list[idx]['ผู้ต้องหา (คน)'] = 1
+                            current_list[idx]['สัญชาติ'] = nat
+                            current_list[idx]['สถานที่ที่จับกุม'] = loc
+                            inserted = True
+                            break
+                        # กรณีที่ 2: มีสัญชาตินั้นอยู่แล้ว ให้บวกจำนวนผู้ต้องหาเพิ่มขึ้น 1
+                        elif current_list[idx]['สัญชาติ'] == nat:
+                            current_list[idx]['ผู้ต้องหา (คน)'] += 1
+                            # ถ้ารวมสถานที่ใหม่เข้าไปด้วย (คั่นด้วยจุลภาค)
+                            if loc not in current_list[idx]['สถานที่ที่จับกุม']:
+                                current_list[idx]['สถานที่ที่จับกุม'] += f", {loc}"
+                            inserted = True
+                            break
+                    
+                    # กรณีที่ 3: สน. นี้ถูกบันทึกด้วยสัญชาติอื่นไปแล้ว (จับสัญชาติใหม่เพิ่ม) -> ให้แทรกบรรทัดใหม่!
+                    if not inserted:
+                        last_idx = target_indices[-1]
+                        new_row = {
+                            'สน.': detected_station,
+                            'ผู้ต้องหา (คน)': 1,
+                            'สัญชาติ': nat,
+                            'สถานที่ที่จับกุม': loc
+                        }
+                        # แทรกแถวใหม่ต่อท้าย สน. เดิมทันที
+                        current_list.insert(last_idx + 1, new_row)
+                
+                st.session_state.report_data = current_list
+                st.success("บันทึกข้อมูลเรียบร้อยแล้ว!")
+                st.rerun()
 
-            with st.expander("🔍 ดูข้อความดิบทั้งหมดที่ระบบถอดออกมา"):
+            with st.expander("🔍 ดูข้อความดิบทั้งหมด"):
                 st.text(extracted_text)
 
 with col_right:
-    st.subheader("📊 แบบฟอร์มรายงานประจำวัน (ตารางสรุป)")
+    st.subheader("📋 ตารางแบบรายงานสรุป (อัปเดตแบบเรียลไทม์)")
     
-    # คำนวณยอดรวมแถวล่างสุด
-    df_to_show = st.session_state.report_df.copy()
+    # แปลง List กลับเป็น DataFrame เพื่อนำมาคำนวณและแสดงผล
+    df_show = pd.DataFrame(st.session_state.report_data)
+    
+    # คำนวณแถว "รวม" สรุปท้ายตาราง
     total_row = pd.DataFrame([{
         'สน.': 'รวม',
-        'ผู้ต้องหา (คน)': df_to_show['ผู้ต้องหา (คน)'].sum(),
+        'ผู้ต้องหา (คน)': df_show['ผู้ต้องหา (คน)'].sum(),
         'สัญชาติ': '',
-        'ผู้ต้องหา พท.ตอนใน': df_to_show['ผู้ต้องหา พท.ตอนใน'].sum(),
-        'ผู้ต้องหา พท.ติดชายแดน': df_to_show['ผู้ต้องหา พท.ติดชายแดน'].sum(),
-        'สถานที่ที่จับกุม': '',
-        'จังหวัด': '',
-        'การลักลอบ เข้ามาเอง': '',
-        'การลักลอบ มีผู้นำเข้า': '',
-        'การตรวจ COVID-19': '',
-        'เดินทางมาก่อน 1963-10-01': '',
-        'หมายเหตุ': ''
+        'สถานที่ที่จับกุม': ''
     }])
-    df_with_total = pd.concat([df_to_show, total_row], ignore_index=True)
+    df_final = pd.concat([df_show, total_row], ignore_index=True)
     
-    # แสดงตารางบนหน้าเว็บ
-    st.dataframe(df_with_total, use_container_width=True, index=False)
+    # แสดงตารางบนหน้าเว็บแบบไม่มี Error index
+    st.dataframe(df_final, use_container_width=True, index=False)
     
-    # ปุ่มดาวน์โหลดไฟล์ Excel หน้าตาตามแบบฟอร์มของพี่
-    excel_data = to_excel(df_with_total)
+    # ปุ่มดาวน์โหลดไฟล์ Excel 
+    excel_data = to_excel(df_final)
     st.download_button(
-        label="📥 ดาวน์โหลดไฟล์ Excel รายงานประจำวัน (.xlsx)",
+        label="📥 ดาวน์โหลดไฟล์ Excel (.xlsx)",
         data=excel_data,
-        file_name="แบบรายงานการจับกุมต่างด้าว_ประจำวัน.xlsx",
+        file_name="รายงานจับกุมต่างด้าว_แยกสน.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True
     )
     
-    if st.button("🗑️ รีเซ็ตตารางรายงานทั้งหมดใหม่"):
-        base_data = []
+    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด"):
+        base_list = []
         for station in STATIONS:
-            base_data.append({
-                'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'ผู้ต้องหา พท.ตอนใน': 0,
-                'ผู้ต้องหา พท.ติดชายแดน': 0, 'สถานที่ที่จับกุม': '-', 'จังหวัด': '-',
-                'การลักลอบ เข้ามาเอง': '-', 'การลักลอบ มีผู้นำเข้า': '-', 'การตรวจ COVID-19': '-',
-                'เดินทางมาก่อน 1963-10-01': '-', 'หมายเหตุ': '-'
-            })
-        st.session_state.report_df = pd.DataFrame(base_data)
+            base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
+        st.session_state.report_data = base_list
         st.rerun()
