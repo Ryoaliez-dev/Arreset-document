@@ -63,40 +63,44 @@ if 'report_data' not in st.session_state:
     st.session_state.report_data = base_list
 
 # ==========================================
-# 2. ฟังก์ชันดึงข้อมูลจากเอกสาร
+# 2. ฟังก์ชันดึงข้อมูล (ปรับปรุงการตรวจจับสัญชาติแบบอัจฉริยะ)
 # ==========================================
 def extract_arrest_info(text):
-    nationality = "ไม่พบข้อมูลสัญชาติ"
+    nationality = "อื่น ๆ"
     location = "ไม่พบข้อมูลสถานที่จับกุม"
     detected_count = 1
     
-    clean_text = re.sub(r'\s+', ' ', text)
+    # ลบช่องว่างออกทั้งหมดเพื่อให้ตรวจหาคีย์เวิร์ดได้แม่นยำ ไม่โดนช่องว่างเว้นวรรคตัดคำ
+    clean_text = re.sub(r'\s+', '', text)
     
-    if any(k in clean_text for k in ["กัมขชำ", "กัมขชา", "กัมศูชา", "กัมพูชา"]):
+    # 🔥 ระบบวิเคราะห์สัญชาติอัจฉริยะ (สแกนหาคีย์เวิร์ดจากข้อความดิบทั้งหมดของเอกสาร)
+    if any(k in clean_text for k in ["กัมพูชา", "กัมขชา", "กัมขชำ", "กัมศูชา", "กัม"]):
         nationality = "กัมพูชา"
-    elif "เมียน" in clean_text or "พม่า" in clean_text:
+    elif any(k in clean_text for k in ["เมียนมา", "เมียน", "พม่า"]):
         nationality = "เมียนมา"
     elif "ลาว" in clean_text:
         nationality = "ลาว"
         
-    loc_match = re.search(r"(?:สถานที่จับกุม|สถานทีจับกุม|จับกุมได้ที่|บริเวณ|บริเาณ)\s*(.+?)(?:\s+เมื่อ|วันที่|วันที|เวลา|พฤติการณ์|เจ้าพนักงาน|\n|$)", clean_text)
+    # ปรับ Regex ดึงสถานที่จับกุมให้ยืดหยุ่นขึ้น (รองรับกรณีตัวอักษรติดกัน)
+    clean_space_text = re.sub(r'\s+', ' ', text)
+    loc_match = re.search(r"(?:สถานที่จับกุม|สถานทีจับกุม|จับกุมได้ที่|บริเวณ|บริเาณ)\s*(.+?)(?:\s+เมื่อ|วันที่|วันที|เวลา|พฤติการณ์|เจ้าพนักงาน|\n|$)", clean_space_text)
     if loc_match:
         location = loc_match.group(1).strip()
         location = location.replace("บริเาณ", "บริเวณ").replace("ชมชน", "ชุมชน").replace("แเขวง", "แขวง")
         
-    count_match = re.search(r"(?:จำนวน|รวม|สัญชาติ[\u0e00-\u0e7f]+\s*)\s*(\d+)\s*(?:คน|ราย|นาม)", clean_text)
+    # ดึงจำนวนคน
+    count_match = re.search(r"(?:จำนวน|รวม|สัญชาติ[\u0e00-\u0e7f]+\s*)\s*(\d+)\s*(?:คน|ราย|นาม)", clean_space_text)
     if count_match:
         detected_count = int(count_match.group(1))
     else:
-        digit_match = re.search(r"(\d+)\s*(?:คน|ราย)", clean_text)
+        digit_match = re.search(r"(\d+)\s*(?:คน|ราย)", clean_space_text)
         if digit_match:
             detected_count = int(digit_match.group(1))
         
     return nationality, location, detected_count
 
-# 🔥 ฟังก์ชันสร้างไฟล์ Excel ที่จัดตำแหน่งคอลัมน์ทั้ง 12 ช่องให้ตรงล็อกแบบฟอร์ม Merge Cells เป๊ะๆ
+# ฟังก์ชันสร้างไฟล์ Excel ที่จัดตำแหน่งคอลัมน์ทั้ง 12 ช่องให้ตรงล็อก
 def build_full_excel(data_list):
-    # ปรับตำแหน่งหัวตารางแถวที่ 1 และ 2 ให้สอดรับกับการผสานเซลล์ของฟอร์มต้นฉบับ
     header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
     header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
     
@@ -111,26 +115,18 @@ def build_full_excel(data_list):
         pht_in = count if not is_empty else 0
         prov = "กรุงเทพมหานคร" if not is_empty else "-"
         
-        # จัดเรียงข้อมูลให้ตรงล็อกตามคอลัมน์หัวตาราง
         body_rows.append([
-            row['สน.'],                     # คอลัมน์ 0: สน.
-            count if count > 0 else 0,     # คอลัมน์ 1: ผู้ต้องหา (คน)
-            row['สัญชาติ'],                 # คอลัมน์ 2: สัญชาติ
-            pht_in,                         # คอลัมน์ 3: ผู้ต้องหา พท.ตอนใน
-            0,                              # คอลัมน์ 4: ผู้ต้องหา พท.ติดชายแดน
-            row['สถานที่ที่จับกุม'],         # คอลัมน์ 5: สถานที่ที่จับกุม
-            prov,                           # คอลัมน์ 6: จังหวัด
-            "-",                            # คอลัมน์ 7: พื้นที่ช่องทาง
-            "-",                            # คอลัมน์ 8: เข้ามาเอง
-            "-",                            # คอลัมน์ 9: มีผู้นำเข้า
-            "-",                            # คอลัมน์ 10: มาก่อน 1 ต.ค.06
-            "-"                             # คอลัมน์ 11: หมายเหตุ
+            row['สน.'],
+            count if count > 0 else 0,
+            row['สัญชาติ'],
+            pht_in,
+            0,
+            row['สถานที่ที่จับกุม'],
+            prov,
+            "-", "-", "-", "-", "-"
         ])
         
-    # เพิ่มแถว "รวม" สรุปยอดท้ายตารางให้ตรงช่อง
     footer_row = ['รวม', total_count, '', total_count, 0, '', '', '', '', '', '', '']
-    
-    # รวมหัวตารางแถว 1, แถว 2, ข้อมูล และแถวสรุปท้าย
     df_final_excel = pd.DataFrame([header_row1, header_row2] + body_rows + [footer_row])
     
     output = io.BytesIO()
@@ -192,6 +188,7 @@ with col_left:
         else:
             st.success("📝 อ่านเอกสารสำเร็จ!")
             
+            # เรียกใช้ฟังก์ชันวิเคราะห์ระบบใหม่
             nat, loc, final_count = extract_arrest_info(extracted_text)
             
             st.info(f"**📌 ตรวจสอบและยืนยันข้อมูลความถูกต้องก่อนบันทึก:**")
@@ -236,3 +233,33 @@ with col_left:
                             'สัญชาติ': edit_nat,
                             'สถานที่ที่จับกุม': edit_loc
                         }
+                        current_list.insert(last_idx + 1, new_row)
+                
+                st.session_state.report_data = current_list
+                st.success(f"บันทึกข้อมูลสำเร็จ!")
+                st.rerun()
+
+with col_right:
+    st.subheader("📋 ตารางแสดงผลบนหน้าเว็บ (ฉบับย่อ)")
+    
+    df_show = pd.DataFrame(st.session_state.report_data)
+    total_row = pd.DataFrame([{'สน.': 'รวม', 'ผู้ต้องหา (คน)': df_show['ผู้ต้องหา (คน)'].sum(), 'สัญชาติ': '', 'สถานที่ที่จับกุม': ''}])
+    df_final = pd.concat([df_show, total_row], ignore_index=True)
+    
+    st.dataframe(df_final, use_container_width=True, index=False)
+    
+    excel_data = build_full_excel(st.session_state.report_data)
+    st.download_button(
+        label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
+        data=excel_data,
+        file_name="แบบรายงานการจับกุมต่างด้าว_อัปเดตสัญชาติ.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    
+    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด"):
+        base_list = []
+        for station in STATIONS:
+            base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
+        st.session_state.report_data = base_list
+        st.rerun()
