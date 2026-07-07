@@ -8,7 +8,7 @@ import pandas as pd
 import fitz  # PyMuPDF
 import io
 
-st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวแยกตาม สน. (เวอร์ชัน Multi-Upload)", layout="wide")
+st.set_page_config(page_title="ระบบรายงานจับกุมต่างด้าวแยกตาม สน.", layout="wide")
 
 # ==========================================
 # 0. ระบบตรวจสอบการเข้าสู่ระบบ (Authentication)
@@ -57,11 +57,11 @@ if 'report_data' not in st.session_state:
         base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
     st.session_state.report_data = base_list
 
-# ล็อกหน่วยความจำเพื่อเก็บรายการคดีที่วิเคราะห์ได้จากหลาย ๆ ไฟล์
+# ใช้สำหรับการล็อกกระบวนการตรวจสอบไฟล์ ไม่ให้เกิด Infinite Loop
+if 'current_files_key' not in st.session_state:
+    st.session_state.current_files_key = ""
 if 'batch_results' not in st.session_state:
     st.session_state.batch_results = []
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = set()
 
 # ==========================================
 # 2. ฟังก์ชันดึงข้อมูลพร้อมระบบซ่อมคำ
@@ -126,7 +126,7 @@ with col_logout:
     if st.button("ออกจากระบบ 🚪"):
         st.session_state.logged_in = False
         st.session_state.batch_results = []
-        st.session_state.processed_files = set()
+        st.session_state.current_files_key = ""
         st.rerun()
 
 st.markdown("---")
@@ -134,14 +134,16 @@ col_left, col_right = st.columns([1, 1])
 
 with col_left:
     st.subheader("📥 ส่วนอัปโหลดคดีจับกุม (เลือกได้หลายไฟล์พร้อมกัน)")
-    
-    # ⚡ เปิดฟังก์ชัน accept_multiple_files=True เพื่อให้ลากไฟล์ใส่ได้ไม่จำกัด
     uploaded_files = st.file_uploader("ลากไฟล์รูปภาพหรือ PDF บันทึกการจับกุมทั้งหมดมาวางที่นี่", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
+    # แก้ไขตรรกะ Infinite Loop: ตรวจสอบการเปลี่ยนแปลงของชุดไฟล์ด้วย Key
     if uploaded_files:
-        # วิ่งลูปสแกนคดีทีละไฟล์เฉพาะไฟล์ใหม่ที่ยังไม่เคยโดนเปิดอ่าน
-        for f in uploaded_files:
-            if f.name not in st.session_state.processed_files:
+        files_key = "_".join([f"{f.name}_{f.size}" for f in uploaded_files])
+        
+        if st.session_state.current_files_key != files_key:
+            st.session_state.batch_results = []
+            
+            for f in uploaded_files:
                 extracted_text = ""
                 file_type = f.name.split('.')[-1].lower()
                 
@@ -175,19 +177,17 @@ with col_left:
                             detected_station = station
                             break
                     
-                    # เก็บผลลัพธ์ของคดีจากไฟล์นี้เข้าคลังชั่วคราว
                     st.session_state.batch_results.append({
                         'file_name': f.name, 'สน.': detected_station,
                         'สัญชาติ': nat, 'จำนวน': final_count, 'สถานที่': loc
                     })
-                st.session_state.processed_files.add(f.name)
+            
+            st.session_state.current_files_key = files_key
 
-        # แสดงรายการคดีที่วิเคราะห์ได้ทั้งหมด เพื่อรอให้พี่ตรวจสอบและอนุมัติเข้าตารางสรุป
+        # แสดงกล่องคดีที่วิเคราะห์เรียบร้อย
         if st.session_state.batch_results:
             st.success(f"📝 AI วิเคราะห์เสร็จสิ้นรวมทั้งหมด {len(st.session_state.batch_results)} คดี")
-            st.info("💡 ท่านสามารถตรวจสอบข้อมูลแต่ละคดีด้านล่างนี้ และกดบันทึกทั้งหมดเข้าตารางสรุปได้ทันทีครับ")
             
-            # วิ่งแสดงผลกล่องยืนยันแยกตามรายคดี
             for i, res in enumerate(st.session_state.batch_results):
                 with st.expander(f"📦 คดีที่ {i+1} จากไฟล์: {res['file_name']}", expanded=True):
                     col1, col2, col3 = st.columns(3)
@@ -199,7 +199,6 @@ with col_left:
                         res['สน.'] = st.selectbox(f"ลงสถานี คดีที่ {i+1}:", STATIONS, index=STATIONS.index(res['สน.']), key=f"st_{i}")
                     res['สถานที่'] = st.text_input(f"สถานที่จับกุม คดีที่ {i+1}:", value=res['สถานที่'], key=f"loc_{i}")
 
-            # 🚀 ปุ่มเด็ด: กดทีเดียว อนุมัติข้อมูลทุกไฟล์วิ่งเข้าตารางฝั่งขวาทันทีในคลิกเดียว!
             if st.button("💾 บันทึกทุกคดีเข้าตารางรายงานพร้อมกัน", type="primary", use_container_width=True):
                 current_list = st.session_state.report_data
                 
@@ -231,13 +230,13 @@ with col_left:
                             current_list.insert(last_idx + 1, new_row)
                             
                 st.session_state.report_data = current_list
-                st.session_state.batch_results = [] # เคลียร์กล่องพักข้อมูลหลังเซฟเสร็จ
+                st.session_state.batch_results = []
+                st.session_state.current_files_key = "" # รีเซ็ตคีย์เพื่อให้พร้อมสำหรับรอบถัดไป
                 st.success("บันทึกข้อมูลทุกไฟล์ลงตารางสำเร็จ!")
                 st.rerun()
     else:
-        # ถ้าเคลียร์ช่องอัปโหลด ให้ล้างความจำไฟล์เก่า
         st.session_state.batch_results = []
-        st.session_state.processed_files = set()
+        st.session_state.current_files_key = ""
 
 with col_right:
     st.subheader("📋 ตารางแสดงผลรายงานภาพรวม")
@@ -257,5 +256,5 @@ with col_right:
             base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
         st.session_state.report_data = base_list
         st.session_state.batch_results = []
-        st.session_state.processed_files = set()
+        st.session_state.current_files_key = ""
         st.rerun()
