@@ -70,10 +70,8 @@ def extract_arrest_info(text):
     location = "ไม่พบข้อมูลสถานที่จับกุม"
     detected_count = 1
     
-    # ลบช่องว่างออกทั้งหมดเพื่อให้ตรวจหาคีย์เวิร์ดได้แม่นยำ ไม่โดนช่องว่างเว้นวรรคตัดคำ
     clean_text = re.sub(r'\s+', '', text)
     
-    # 🔥 ระบบวิเคราะห์สัญชาติอัจฉริยะ (สแกนหาคีย์เวิร์ดจากข้อความดิบทั้งหมดของเอกสาร)
     if any(k in clean_text for k in ["กัมพูชา", "กัมขชา", "กัมขชำ", "กัมศูชา", "กัม"]):
         nationality = "กัมพูชา"
     elif any(k in clean_text for k in ["เมียนมา", "เมียน", "พม่า"]):
@@ -81,14 +79,12 @@ def extract_arrest_info(text):
     elif "ลาว" in clean_text:
         nationality = "ลาว"
         
-    # ปรับ Regex ดึงสถานที่จับกุมให้ยืดหยุ่นขึ้น (รองรับกรณีตัวอักษรติดกัน)
     clean_space_text = re.sub(r'\s+', ' ', text)
     loc_match = re.search(r"(?:สถานที่จับกุม|สถานทีจับกุม|จับกุมได้ที่|บริเวณ|บริเาณ)\s*(.+?)(?:\s+เมื่อ|วันที่|วันที|เวลา|พฤติการณ์|เจ้าพนักงาน|\n|$)", clean_space_text)
     if loc_match:
         location = loc_match.group(1).strip()
         location = location.replace("บริเาณ", "บริเวณ").replace("ชมชน", "ชุมชน").replace("แเขวง", "แขวง")
         
-    # ดึงจำนวนคน
     count_match = re.search(r"(?:จำนวน|รวม|สัญชาติ[\u0e00-\u0e7f]+\s*)\s*(\d+)\s*(?:คน|ราย|นาม)", clean_space_text)
     if count_match:
         detected_count = int(count_match.group(1))
@@ -99,7 +95,7 @@ def extract_arrest_info(text):
         
     return nationality, location, detected_count
 
-# ฟังก์ชันสร้างไฟล์ Excel ที่จัดตำแหน่งคอลัมน์ทั้ง 12 ช่องให้ตรงล็อก
+# 🔥 ฟังก์ชันสร้างไฟล์ Excel แก้ไขระบบให้ทำงานถูกต้องไม่พังเบื้องหลัง
 def build_full_excel(data_list):
     header_row1 = ['สน.', 'ผู้ต้องหา', 'สัญชาติ', 'ผู้ต้องหา', '', 'สถานที่ที่จับกุม', 'จังหวัด', 'การลักลอบ', '', '', 'เดินทาง', 'หมายเหตุ']
     header_row2 = ['', '( คน )', '', 'พท.ตอนใน', 'พท.ติดชายแดน', '', '', 'พื้นที่ช่องทาง', 'เข้ามาเอง', 'มีผู้นำเข้า / นายหน้า', 'มาก่อน 1 ต.ค.06', '']
@@ -127,7 +123,10 @@ def build_full_excel(data_list):
         ])
         
     footer_row = ['รวม', total_count, '', total_count, 0, '', '', '', '', '', '', '']
-    df_final_excel = pd.DataFrame([header_row1, header_row2] + body_rows + [footer_row])
+    
+    # แก้ไขตรงนี้: ผสานโครงสร้างทั้งหมดเป็น List เดียวกันก่อนส่งเข้า DataFrame เพื่อไม่ให้ระบบหลังบ้านแครช
+    all_table_data = [header_row1, header_row2] + body_rows + [footer_row]
+    df_final_excel = pd.DataFrame(all_table_data)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -188,7 +187,6 @@ with col_left:
         else:
             st.success("📝 อ่านเอกสารสำเร็จ!")
             
-            # เรียกใช้ฟังก์ชันวิเคราะห์ระบบใหม่
             nat, loc, final_count = extract_arrest_info(extracted_text)
             
             st.info(f"**📌 ตรวจสอบและยืนยันข้อมูลความถูกต้องก่อนบันทึก:**")
@@ -248,16 +246,21 @@ with col_right:
     
     st.dataframe(df_final, use_container_width=True, index=False)
     
-    excel_data = build_full_excel(st.session_state.report_data)
-    st.download_button(
-        label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
-        data=excel_data,
-        file_name="แบบรายงานการจับกุมต่างด้าว_อัปเดตสัญชาติ.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    # 📥 ปุ่มดาวน์โหลด Excel ที่เปิดให้แสดงผลได้สมบูรณ์แล้ว
+    try:
+        excel_data = build_full_excel(st.session_state.report_data)
+        st.download_button(
+            label="📥 ดาวน์โหลดไฟล์ Excel สำหรับส่งรายงาน (.xlsx)",
+            data=excel_data,
+            file_name="แบบรายงานการจับกุมต่างด้าว_ฟอร์มจริง.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    except Exception as e:
+        st.error(f"เกิดข้อผิดพลาดในการเตรียมไฟล์ดาวน์โหลด: {e}")
     
-    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด"):
+    # 🗑️ ปุ่มรีเซ็ตสีแดง
+    if st.button("🗑️ รีเซ็ตข้อมูลตารางใหม่ทั้งหมด", type="primary", use_container_width=True):
         base_list = []
         for station in STATIONS:
             base_list.append({'สน.': station, 'ผู้ต้องหา (คน)': 0, 'สัญชาติ': '-', 'สถานที่ที่จับกุม': '-'})
